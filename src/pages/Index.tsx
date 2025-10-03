@@ -45,14 +45,24 @@ const Index = () => {
             </div>
           </div>
 
-          <Button
-            onClick={() => navigate('/auth')}
-            size="lg"
-            className="w-full h-14 text-lg bg-white text-primary hover:bg-white/90 transition-all shadow-lg hover:shadow-xl"
-          >
-            Get Started
-            <ArrowRight className="ml-2 h-5 w-5" />
-          </Button>
+          <div className="flex flex-col sm:flex-row gap-4">
+            <Button
+              onClick={() => navigate('/queue')}
+              size="lg"
+              className="w-full h-14 text-lg bg-white text-primary hover:bg-white/90 transition-all shadow-lg hover:shadow-xl"
+            >
+              Join Queue
+              <ArrowRight className="ml-2 h-5 w-5" />
+            </Button>
+            <Button
+              onClick={() => navigate('/auth')}
+              size="lg"
+              variant="outline"
+              className="w-full h-14 text-lg bg-white/10 text-white border-white hover:bg-white/20"
+            >
+              Staff Login
+            </Button>
+          </div>
 
           <p className="text-sm opacity-75">
             Join thousands of satisfied customers enjoying hassle-free queuing

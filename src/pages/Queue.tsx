@@ -1,11 +1,11 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { LogOut, Users, Clock, Ticket, Bell, Loader2, CheckCircle2 } from "lucide-react";
-import type { User } from "@supabase/supabase-js";
+import { Users, Clock, Ticket, Bell, Loader2, CheckCircle2 } from "lucide-react";
 
 interface QueueEntry {
   id: string;
@@ -14,59 +14,56 @@ interface QueueEntry {
   status: string;
   estimated_wait_minutes: number | null;
   counter_id: string;
-  counters: {
-    counter_number: number;
-    name: string;
-  };
 }
 
 const Queue = () => {
-  const navigate = useNavigate();
   const { toast } = useToast();
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [joining, setJoining] = useState(false);
   const [queueEntry, setQueueEntry] = useState<QueueEntry | null>(null);
   const [totalInQueue, setTotalInQueue] = useState(0);
+  const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
 
   useEffect(() => {
-    const initializeAuth = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        navigate('/auth');
-        return;
-      }
-      setUser(user);
-      await fetchQueueStatus(user.id);
-      setLoading(false);
-    };
+    // Check if user has an active queue entry in localStorage
+    const storedEntryId = localStorage.getItem("queueEntryId");
+    if (storedEntryId) {
+      fetchQueueEntry(storedEntryId);
+    }
 
-    initializeAuth();
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        await fetchQueueStatus(session.user.id);
-      }
-    });
-
-    return () => subscription.unsubscribe();
-  }, [navigate]);
+    const storedName = localStorage.getItem("queueUserName");
+    const storedPhone = localStorage.getItem("queueUserPhone");
+    if (storedName) setName(storedName);
+    if (storedPhone) setPhone(storedPhone);
+  }, []);
 
   useEffect(() => {
-    if (!user) return;
+    if (!queueEntry) return;
 
+    // Subscribe to real-time updates for the queue entry
     const channel = supabase
-      .channel('queue-changes')
+      .channel(`queue_entry_${queueEntry.id}`)
       .on(
-        'postgres_changes',
+        "postgres_changes",
         {
-          event: '*',
-          schema: 'public',
-          table: 'queue_entries',
+          event: "*",
+          schema: "public",
+          table: "queue_entries",
+          filter: `id=eq.${queueEntry.id}`,
         },
-        async () => {
-          await fetchQueueStatus(user.id);
+        (payload) => {
+          if (payload.eventType === "UPDATE") {
+            setQueueEntry(payload.new as QueueEntry);
+            checkNotification(payload.new as QueueEntry);
+          } else if (payload.eventType === "DELETE") {
+            toast({
+              title: "Queue Entry Completed",
+              description: "You have been served. Thank you!",
+            });
+            localStorage.removeItem("queueEntryId");
+            setQueueEntry(null);
+          }
         }
       )
       .subscribe();
@@ -74,73 +71,90 @@ const Queue = () => {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [user]);
+  }, [queueEntry]);
 
-  const fetchQueueStatus = async (userId: string) => {
-    const { data, error } = await supabase
-      .from('queue_entries')
-      .select(`
-        *,
-        counters (
-          counter_number,
-          name
-        )
-      `)
-      .eq('user_id', userId)
-      .in('status', ['waiting', 'called'])
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+  const fetchQueueEntry = async (entryId: string) => {
+    setLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from("queue_entries")
+        .select("*")
+        .eq("id", entryId)
+        .maybeSingle();
 
-    if (error) {
-      console.error('Error fetching queue status:', error);
-      return;
-    }
-
-    setQueueEntry(data);
-
-    if (data) {
-      const { count } = await supabase
-        .from('queue_entries')
-        .select('*', { count: 'exact', head: true })
-        .eq('counter_id', data.counter_id)
-        .eq('status', 'waiting')
-        .lt('position_in_queue', data.position_in_queue);
-
-      setTotalInQueue(count || 0);
-
-      if (count !== null && count <= 2 && data.status === 'waiting') {
-        toast({
-          title: "Almost your turn!",
-          description: `Only ${count} ${count === 1 ? 'person' : 'people'} ahead of you. Please be ready.`,
-          duration: 5000,
-        });
+      if (error) throw error;
+      
+      if (data && data.status === "waiting") {
+        setQueueEntry(data);
+        checkNotification(data);
+        
+        // Fetch count ahead
+        const { count } = await supabase
+          .from('queue_entries')
+          .select('*', { count: 'exact', head: true })
+          .eq('counter_id', data.counter_id)
+          .eq('status', 'waiting')
+          .lt('position_in_queue', data.position_in_queue);
+        
+        setTotalInQueue(count || 0);
+      } else {
+        // Entry doesn't exist or is not waiting anymore
+        localStorage.removeItem("queueEntryId");
+        setQueueEntry(null);
       }
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message,
+        variant: "destructive",
+      });
+      localStorage.removeItem("queueEntryId");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const checkNotification = (entry: QueueEntry) => {
+    if (entry.position_in_queue <= 3 && entry.status === "waiting") {
+      toast({
+        title: "Almost your turn!",
+        description: `Only ${entry.position_in_queue - 1} people ahead of you. Please be ready.`,
+        duration: 5000,
+      });
     }
   };
 
   const joinQueue = async () => {
-    if (!user) return;
-    
+    if (!name.trim() || !phone.trim()) {
+      toast({
+        title: "Error",
+        description: "Please enter your name and phone number",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setJoining(true);
     try {
-      const { data: counters, error: countersError } = await supabase
-        .from('counters')
-        .select('id, counter_number')
-        .eq('is_active', true);
+      // Get the counter with the shortest queue
+      const { data: counters, error: counterError } = await supabase
+        .from("counters")
+        .select("id")
+        .eq("is_active", true);
 
-      if (countersError) throw countersError;
+      if (counterError) throw counterError;
       if (!counters || counters.length === 0) {
-        throw new Error('No active counters available');
+        throw new Error("No active counters available");
       }
 
+      // Find counter with shortest queue
       const counterCounts = await Promise.all(
         counters.map(async (counter) => {
           const { count } = await supabase
-            .from('queue_entries')
-            .select('*', { count: 'exact', head: true })
-            .eq('counter_id', counter.id)
-            .eq('status', 'waiting');
+            .from("queue_entries")
+            .select("*", { count: "exact", head: true })
+            .eq("counter_id", counter.id)
+            .eq("status", "waiting");
           return { counter, count: count || 0 };
         })
       );
@@ -149,53 +163,60 @@ const Queue = () => {
         curr.count < min.count ? curr : min
       );
 
-      const { count: currentPosition } = await supabase
-        .from('queue_entries')
-        .select('*', { count: 'exact', head: true })
-        .eq('counter_id', selectedCounter.counter.id)
-        .eq('status', 'waiting');
+      // Get the next token number (global)
+      const { data: lastEntry } = await supabase
+        .from("queue_entries")
+        .select("token_number")
+        .order("token_number", { ascending: false })
+        .limit(1)
+        .maybeSingle();
 
-      const { count: totalTokens } = await supabase
-        .from('queue_entries')
-        .select('*', { count: 'exact', head: true });
+      const tokenNumber = (lastEntry?.token_number || 0) + 1;
 
-      const tokenNumber = (totalTokens || 0) + 1;
-      const positionInQueue = (currentPosition || 0) + 1;
-      const estimatedWaitMinutes = positionInQueue * 2;
+      // Get current queue length for position
+      const { count } = await supabase
+        .from("queue_entries")
+        .select("*", { count: "exact", head: true })
+        .eq("counter_id", selectedCounter.counter.id)
+        .eq("status", "waiting");
 
-      const { error: insertError } = await supabase
-        .from('queue_entries')
+      const position = (count || 0) + 1;
+
+      const { data: newEntry, error: insertError } = await supabase
+        .from("queue_entries")
         .insert({
-          user_id: user.id,
+          user_id: null, // Anonymous user
           counter_id: selectedCounter.counter.id,
           token_number: tokenNumber,
-          position_in_queue: positionInQueue,
-          estimated_wait_minutes: estimatedWaitMinutes,
-          status: 'waiting',
-        });
+          position_in_queue: position,
+          estimated_wait_minutes: position * 2,
+        })
+        .select()
+        .single();
 
       if (insertError) throw insertError;
 
+      // Store the queue entry ID in localStorage
+      localStorage.setItem("queueEntryId", newEntry.id);
+      localStorage.setItem("queueUserName", name);
+      localStorage.setItem("queueUserPhone", phone);
+
+      setQueueEntry(newEntry);
+      setTotalInQueue(0);
+
       toast({
-        title: "Joined Queue!",
+        title: "Joined Queue",
         description: `Your token number is ${tokenNumber}`,
       });
-
-      await fetchQueueStatus(user.id);
     } catch (error: any) {
       toast({
-        variant: "destructive",
-        title: "Failed to join queue",
+        title: "Error",
         description: error.message,
+        variant: "destructive",
       });
     } finally {
       setJoining(false);
     }
-  };
-
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
-    navigate('/auth');
   };
 
   if (loading) {
@@ -209,19 +230,9 @@ const Queue = () => {
   return (
     <div className="min-h-screen bg-background pb-20">
       <div className="bg-gradient-hero p-6 text-white shadow-lg">
-        <div className="max-w-md mx-auto flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold">Smart Queue</h1>
-            <p className="text-sm opacity-90">Virtual Queue Management</p>
-          </div>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={handleLogout}
-            className="text-white hover:bg-white/20"
-          >
-            <LogOut className="h-5 w-5" />
-          </Button>
+        <div className="max-w-md mx-auto">
+          <h1 className="text-2xl font-bold">Smart Queue</h1>
+          <p className="text-sm opacity-90">No login required - Just join the queue</p>
         </div>
       </div>
 
@@ -234,10 +245,32 @@ const Queue = () => {
                 Join Virtual Queue
               </CardTitle>
               <CardDescription>
-                Get a token number and track your position in real-time
+                Enter your details to get a token and track your position
               </CardDescription>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="name">Your Name</Label>
+                <Input
+                  id="name"
+                  type="text"
+                  placeholder="Enter your name"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  className="h-12"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="phone">Phone Number</Label>
+                <Input
+                  id="phone"
+                  type="tel"
+                  placeholder="Enter your phone number"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  className="h-12"
+                />
+              </div>
               <Button
                 onClick={joinQueue}
                 disabled={joining}
@@ -264,6 +297,9 @@ const Queue = () => {
                 <CardTitle className="text-center text-3xl font-bold">
                   Token #{queueEntry.token_number}
                 </CardTitle>
+                <CardDescription className="text-center text-white/80">
+                  {localStorage.getItem("queueUserName")}
+                </CardDescription>
               </CardHeader>
               <CardContent className="pt-6 space-y-4">
                 <div className="flex items-center justify-between p-4 bg-muted rounded-lg">
@@ -288,16 +324,6 @@ const Queue = () => {
                     <p className="text-sm text-muted-foreground">Estimated Wait Time</p>
                     <p className="text-xl font-semibold">
                       {queueEntry.estimated_wait_minutes || 0} minutes
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-3 p-4 bg-muted rounded-lg">
-                  <Ticket className="h-8 w-8 text-secondary" />
-                  <div>
-                    <p className="text-sm text-muted-foreground">Assigned Counter</p>
-                    <p className="text-xl font-semibold">
-                      Counter {queueEntry.counters.counter_number}
                     </p>
                   </div>
                 </div>

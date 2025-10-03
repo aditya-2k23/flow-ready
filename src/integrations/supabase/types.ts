@@ -87,7 +87,7 @@ export type Database = {
           status: string
           token_number: number
           updated_at: string
-          user_id: string
+          user_id: string | null
         }
         Insert: {
           called_at?: string | null
@@ -101,7 +101,7 @@ export type Database = {
           status?: string
           token_number: number
           updated_at?: string
-          user_id: string
+          user_id?: string | null
         }
         Update: {
           called_at?: string | null
@@ -115,7 +115,7 @@ export type Database = {
           status?: string
           token_number?: number
           updated_at?: string
-          user_id?: string
+          user_id?: string | null
         }
         Relationships: [
           {
@@ -127,11 +127,39 @@ export type Database = {
           },
         ]
       }
+      user_roles: {
+        Row: {
+          created_at: string | null
+          id: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
+      has_role: {
+        Args: {
+          _role: Database["public"]["Enums"]["app_role"]
+          _user_id: string
+        }
+        Returns: boolean
+      }
       reorder_queue_positions: {
         Args: { p_counter_id: string }
         Returns: undefined
