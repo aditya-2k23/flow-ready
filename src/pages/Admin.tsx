@@ -188,7 +188,6 @@ export default function Admin() {
   };
 
   const handleCreateStaff = async () => {
-    // Validation happens in the edge function, but we also validate here for better UX
     if (!newStaffEmail || !newStaffPassword || !newStaffName || !newStaffPhone) {
       toast({
         title: "Error",
@@ -198,108 +197,43 @@ export default function Admin() {
       return;
     }
 
-    if (newStaffPassword.length < 6) {
-      toast({
-        title: "Error",
-        description: "Password must be at least 6 characters",
-        variant: "destructive",
-      });
-      return;
-    }
-
     try {
-      // Get the current session
-      const { data: { session } } = await supabase.auth.getSession();
-      
-      if (!session) {
-        toast({
-          title: "Error",
-          description: "You must be logged in to create staff accounts",
-          variant: "destructive",
-        });
-        return;
-      }
-
-      // Call edge function to create staff atomically
-      const { data, error } = await supabase.functions.invoke('create-staff', {
-        body: { 
-          email: newStaffEmail, 
-          password: newStaffPassword, 
-          fullName: newStaffName, 
-          phoneNumber: newStaffPhone 
-        }
+      // Create auth user using admin API (this requires service role key)
+      const { data: authData, error: authError } = await supabase.auth.signUp({
+        email: newStaffEmail,
+        password: newStaffPassword,
+        options: {
+          data: {
+            full_name: newStaffName,
+            phone_number: newStaffPhone,
+            role: "staff",
+          },
+        },
       });
 
-      if (error) {
-        toast({
-          title: "Error",
-          description: error.message,
-          variant: "destructive",
-        });
-        return;
-      }
+      if (authError) throw authError;
 
-      if (data.error) {
-        toast({
-          title: "Error",
-          description: data.error,
-          variant: "destructive",
-        });
-        return;
+      if (authData.user) {
+        // Assign staff role
+        const { error: roleError } = await supabase
+          .from("user_roles")
+          .insert({
+            user_id: authData.user.id,
+            role: "staff",
+          });
+
+        if (roleError) throw roleError;
       }
 
       toast({
         title: "Success",
-        description: "Staff account created successfully",
+        description: "Staff member created successfully",
       });
 
       setNewStaffEmail("");
       setNewStaffPassword("");
       setNewStaffName("");
       setNewStaffPhone("");
-      fetchData();
-    } catch (error: any) {
-      toast({
-        title: "Error",
-        description: error.message,
-        variant: "destructive",
-      });
-    }
-  };
-
-  const handleDeleteUser = async (userId: string) => {
-    if (!confirm("Are you sure you want to delete this user? This action cannot be undone.")) {
-      return;
-    }
-
-    try {
-      const { data, error } = await supabase.functions.invoke('delete-user', {
-        body: { userId }
-      });
-
-      if (error) {
-        toast({
-          title: "Error",
-          description: error.message,
-          variant: "destructive",
-        });
-        return;
-      }
-
-      if (data.error) {
-        toast({
-          title: "Error",
-          description: data.error,
-          variant: "destructive",
-        });
-        return;
-      }
-
-      toast({
-        title: "Success",
-        description: "User deleted successfully",
-      });
-
       fetchData();
     } catch (error: any) {
       toast({
@@ -396,7 +330,6 @@ export default function Admin() {
                   <DialogContent>
                     <DialogHeader>
                       <DialogTitle>Create New Counter</DialogTitle>
-                      <p className="text-sm text-muted-foreground">Add a new service counter to the queue system</p>
                     </DialogHeader>
                     <div className="space-y-4 pt-4">
                       <div>
@@ -469,7 +402,6 @@ export default function Admin() {
                   <DialogContent>
                     <DialogHeader>
                       <DialogTitle>Create Staff Account</DialogTitle>
-                      <p className="text-sm text-muted-foreground">Add a new staff member to the system</p>
                     </DialogHeader>
                     <div className="space-y-4 pt-4">
                       <div>
@@ -535,13 +467,6 @@ export default function Admin() {
                         {staff.email} • {staff.phone_number}
                       </p>
                     </div>
-                    <Button
-                      variant="destructive"
-                      size="icon"
-                      onClick={() => handleDeleteUser(staff.id)}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
                   </div>
                 ))}
               </div>
