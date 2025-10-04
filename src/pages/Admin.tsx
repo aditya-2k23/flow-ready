@@ -188,6 +188,7 @@ export default function Admin() {
   };
 
   const handleCreateStaff = async () => {
+    // Validation happens in the edge function, but we also validate here for better UX
     if (!newStaffEmail || !newStaffPassword || !newStaffName || !newStaffPhone) {
       toast({
         title: "Error",
@@ -197,37 +198,59 @@ export default function Admin() {
       return;
     }
 
+    if (newStaffPassword.length < 6) {
+      toast({
+        title: "Error",
+        description: "Password must be at least 6 characters",
+        variant: "destructive",
+      });
+      return;
+    }
+
     try {
-      // Create auth user using admin API (this requires service role key)
-      const { data: authData, error: authError } = await supabase.auth.signUp({
-        email: newStaffEmail,
-        password: newStaffPassword,
-        options: {
-          data: {
-            full_name: newStaffName,
-            phone_number: newStaffPhone,
-            role: "staff",
-          },
-        },
+      // Get the current session
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session) {
+        toast({
+          title: "Error",
+          description: "You must be logged in to create staff accounts",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // Call edge function to create staff atomically
+      const { data, error } = await supabase.functions.invoke('create-staff', {
+        body: { 
+          email: newStaffEmail, 
+          password: newStaffPassword, 
+          fullName: newStaffName, 
+          phoneNumber: newStaffPhone 
+        }
       });
 
-      if (authError) throw authError;
+      if (error) {
+        toast({
+          title: "Error",
+          description: error.message,
+          variant: "destructive",
+        });
+        return;
+      }
 
-      if (authData.user) {
-        // Assign staff role
-        const { error: roleError } = await supabase
-          .from("user_roles")
-          .insert({
-            user_id: authData.user.id,
-            role: "staff",
-          });
-
-        if (roleError) throw roleError;
+      if (data.error) {
+        toast({
+          title: "Error",
+          description: data.error,
+          variant: "destructive",
+        });
+        return;
       }
 
       toast({
         title: "Success",
-        description: "Staff member created successfully",
+        description: "Staff account created successfully",
       });
 
       setNewStaffEmail("");
