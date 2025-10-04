@@ -396,6 +396,7 @@ export default function Admin() {
                   <DialogContent>
                     <DialogHeader>
                       <DialogTitle>Create New Counter</DialogTitle>
+                      <p className="text-sm text-muted-foreground">Add a new service counter to the queue system</p>
                     </DialogHeader>
                     <div className="space-y-4 pt-4">
                       <div>
@@ -468,6 +469,7 @@ export default function Admin() {
                   <DialogContent>
                     <DialogHeader>
                       <DialogTitle>Create Staff Account</DialogTitle>
+                      <p className="text-sm text-muted-foreground">Add a new staff member to the system</p>
                     </DialogHeader>
                     <div className="space-y-4 pt-4">
                       <div>
