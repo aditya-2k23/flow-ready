@@ -64,12 +64,24 @@ const Queue = () => {
         },
         (payload) => {
           if (payload.eventType === "UPDATE") {
-            setQueueEntry(payload.new as QueueEntry);
-            checkNotification(payload.new as QueueEntry);
+            const updatedEntry = payload.new as QueueEntry;
+            // If status changed to 'served', show feedback
+            if (updatedEntry.status === 'served') {
+              setShowFeedback(true);
+              localStorage.removeItem("queueEntryId");
+              setQueueEntry(null);
+            } else {
+              setQueueEntry(updatedEntry);
+              checkNotification(updatedEntry);
+            }
           } else if (payload.eventType === "DELETE") {
-            setShowFeedback(true);
+            // Customer left the queue
             localStorage.removeItem("queueEntryId");
             setQueueEntry(null);
+            toast({
+              title: "Queue Session Ended",
+              description: "You have left the queue.",
+            });
           }
         }
       )
