@@ -14,6 +14,10 @@ interface QueueEntry {
   status: string;
   estimated_wait_minutes: number | null;
   counter_id: string;
+  counters?: {
+    counter_number: number;
+    name: string;
+  };
 }
 
 const Queue = () => {
@@ -78,7 +82,7 @@ const Queue = () => {
     try {
       const { data, error } = await supabase
         .from("queue_entries")
-        .select("*")
+        .select("*, counters(counter_number, name)")
         .eq("id", entryId)
         .maybeSingle();
 
@@ -317,6 +321,18 @@ const Queue = () => {
                     <p className="text-xl font-semibold">{totalInQueue}</p>
                   </div>
                 </div>
+
+                {queueEntry.counters && (
+                  <div className="flex items-center gap-3 p-4 bg-secondary/10 rounded-lg">
+                    <div className="h-12 w-12 rounded-full bg-gradient-secondary flex items-center justify-center">
+                      <span className="text-white font-bold">{queueEntry.counters.counter_number}</span>
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted-foreground">Assigned Counter</p>
+                      <p className="text-xl font-semibold">{queueEntry.counters.name}</p>
+                    </div>
+                  </div>
+                )}
 
                 <div className="flex items-center gap-3 p-4 bg-accent rounded-lg">
                   <Clock className="h-8 w-8 text-primary" />

@@ -129,23 +129,38 @@ const Staff = () => {
       return;
     }
 
-    const userIds = entries.map(e => e.user_id);
-    const { data: profiles, error: profileError } = await supabase
-      .from('profiles')
-      .select('id, full_name, phone_number')
-      .in('id', userIds);
-
-    if (profileError) {
-      console.error('Error fetching profiles:', profileError);
-      setQueueEntries([]);
-      return;
+    // Get user IDs that are not null (authenticated users)
+    const userIds = entries.filter(e => e.user_id).map(e => e.user_id);
+    
+    let profileMap = new Map();
+    
+    if (userIds.length > 0) {
+      const { data: profiles } = await supabase
+        .from('profiles')
+        .select('id, full_name, phone_number')
+        .in('id', userIds);
+      
+      profileMap = new Map(profiles?.map(p => [p.id, p]) || []);
     }
 
-    const profileMap = new Map(profiles?.map(p => [p.id, p]) || []);
-    const entriesWithProfiles = entries.map(entry => ({
-      ...entry,
-      profiles: profileMap.get(entry.user_id) || { full_name: 'Unknown', phone_number: '' }
-    }));
+    // For anonymous users, create a guest profile with stored data
+    const entriesWithProfiles = entries.map(entry => {
+      if (entry.user_id && profileMap.has(entry.user_id)) {
+        return {
+          ...entry,
+          profiles: profileMap.get(entry.user_id)
+        };
+      } else {
+        // Anonymous user - use guest data
+        return {
+          ...entry,
+          profiles: {
+            full_name: 'Guest Customer',
+            phone_number: 'N/A'
+          }
+        };
+      }
+    });
 
     setQueueEntries(entriesWithProfiles as QueueEntry[]);
   };
