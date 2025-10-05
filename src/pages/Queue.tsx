@@ -1,13 +1,34 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
-import { Users, Clock, Ticket, Bell, Loader2, CheckCircle2, LogOut, Star } from "lucide-react";
+import {
+  Users,
+  Clock,
+  Ticket,
+  Bell,
+  Loader2,
+  CheckCircle2,
+  LogOut,
+  Star,
+} from "lucide-react";
 
 interface QueueEntry {
   id: string;
@@ -34,6 +55,8 @@ const Queue = () => {
   const [showFeedback, setShowFeedback] = useState(false);
   const [rating, setRating] = useState(0);
   const [feedbackText, setFeedbackText] = useState("");
+  const [completedQueueEntry, setCompletedQueueEntry] =
+    useState<QueueEntry | null>(null);
 
   useEffect(() => {
     // Check if user has an active queue entry in localStorage
@@ -65,10 +88,11 @@ const Queue = () => {
         (payload) => {
           if (payload.eventType === "UPDATE") {
             const updatedEntry = payload.new as QueueEntry;
-            // If status changed to 'served', show feedback
-            if (updatedEntry.status === 'served') {
+            // If status changed to 'done', show feedback
+            if (updatedEntry.status === "done") {
+              // Store the completed entry for feedback submission
+              setCompletedQueueEntry(updatedEntry);
               setShowFeedback(true);
-              localStorage.removeItem("queueEntryId");
               setQueueEntry(null);
             } else {
               setQueueEntry(updatedEntry);
@@ -102,19 +126,19 @@ const Queue = () => {
         .maybeSingle();
 
       if (error) throw error;
-      
+
       if (data && data.status === "waiting") {
         setQueueEntry(data);
         checkNotification(data);
-        
+
         // Fetch count ahead
         const { count } = await supabase
-          .from('queue_entries')
-          .select('*', { count: 'exact', head: true })
-          .eq('counter_id', data.counter_id)
-          .eq('status', 'waiting')
-          .lt('position_in_queue', data.position_in_queue);
-        
+          .from("queue_entries")
+          .select("*", { count: "exact", head: true })
+          .eq("counter_id", data.counter_id)
+          .eq("status", "waiting")
+          .lt("position_in_queue", data.position_in_queue);
+
         setTotalInQueue(count || 0);
       } else {
         // Entry doesn't exist or is not waiting anymore
@@ -137,7 +161,9 @@ const Queue = () => {
     if (entry.position_in_queue <= 3 && entry.status === "waiting") {
       toast({
         title: "Almost your turn!",
-        description: `Only ${entry.position_in_queue - 1} people ahead of you. Please be ready.`,
+        description: `Only ${
+          entry.position_in_queue - 1
+        } people ahead of you. Please be ready.`,
         duration: 5000,
       });
     }
@@ -240,7 +266,7 @@ const Queue = () => {
 
   const leaveQueue = async () => {
     if (!queueEntry) return;
-    
+
     setLeaving(true);
     try {
       const { error } = await supabase
@@ -268,14 +294,60 @@ const Queue = () => {
     }
   };
 
-  const submitFeedback = () => {
-    toast({
-      title: "Thank you for your feedback!",
-      description: "We appreciate your time.",
-    });
-    setShowFeedback(false);
-    setRating(0);
-    setFeedbackText("");
+  const submitFeedback = async () => {
+    if (rating === 0) {
+      toast({
+        title: "Rating required",
+        description: "Please rate your experience before submitting.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      // Get customer info from localStorage
+      const customerName = localStorage.getItem("queueUserName");
+      const customerPhone = localStorage.getItem("queueUserPhone");
+
+      if (!completedQueueEntry) {
+        throw new Error("Queue entry information not available");
+      }
+
+      // Save feedback to database
+      const { error } = await supabase.from("feedback").insert({
+        queue_entry_id: completedQueueEntry.id,
+        rating: rating,
+        comments: feedbackText || null,
+        customer_name: customerName,
+        customer_phone: customerPhone,
+        counter_id: completedQueueEntry.counter_id,
+      });
+
+      if (error) throw error;
+
+      toast({
+        title: "Thank you for your feedback!",
+        description:
+          "We appreciate your time and will use your feedback to improve our service.",
+      });
+
+      // Clear localStorage data and completed entry
+      localStorage.removeItem("queueEntryId");
+      localStorage.removeItem("queueUserName");
+      localStorage.removeItem("queueUserPhone");
+
+      setShowFeedback(false);
+      setRating(0);
+      setFeedbackText("");
+      setCompletedQueueEntry(null);
+    } catch (error: any) {
+      console.error("Error submitting feedback:", error);
+      toast({
+        title: "Error submitting feedback",
+        description: error.message || "Please try again later.",
+        variant: "destructive",
+      });
+    }
   };
 
   if (loading) {
@@ -291,7 +363,9 @@ const Queue = () => {
       <div className="bg-gradient-hero p-6 text-white shadow-lg">
         <div className="max-w-md mx-auto">
           <h1 className="text-2xl font-bold">Smart Queue</h1>
-          <p className="text-sm opacity-90">No login required - Just join the queue</p>
+          <p className="text-sm opacity-90">
+            No login required - Just join the queue
+          </p>
         </div>
       </div>
 
@@ -367,12 +441,18 @@ const Queue = () => {
                       <Users className="h-6 w-6 text-white" />
                     </div>
                     <div>
-                      <p className="text-sm text-muted-foreground">Position in Queue</p>
-                      <p className="text-2xl font-bold">{queueEntry.position_in_queue}</p>
+                      <p className="text-sm text-muted-foreground">
+                        Position in Queue
+                      </p>
+                      <p className="text-2xl font-bold">
+                        {queueEntry.position_in_queue}
+                      </p>
                     </div>
                   </div>
                   <div className="text-right">
-                    <p className="text-sm text-muted-foreground">Ahead of you</p>
+                    <p className="text-sm text-muted-foreground">
+                      Ahead of you
+                    </p>
                     <p className="text-xl font-semibold">{totalInQueue}</p>
                   </div>
                 </div>
@@ -380,11 +460,17 @@ const Queue = () => {
                 {queueEntry.counters && (
                   <div className="flex items-center gap-3 p-4 bg-secondary/10 rounded-lg">
                     <div className="h-12 w-12 rounded-full bg-gradient-secondary flex items-center justify-center">
-                      <span className="text-white font-bold">{queueEntry.counters.counter_number}</span>
+                      <span className="text-white font-bold">
+                        {queueEntry.counters.counter_number}
+                      </span>
                     </div>
                     <div>
-                      <p className="text-sm text-muted-foreground">Assigned Counter</p>
-                      <p className="text-xl font-semibold">{queueEntry.counters.name}</p>
+                      <p className="text-sm text-muted-foreground">
+                        Assigned Counter
+                      </p>
+                      <p className="text-xl font-semibold">
+                        {queueEntry.counters.name}
+                      </p>
                     </div>
                   </div>
                 )}
@@ -392,29 +478,35 @@ const Queue = () => {
                 <div className="flex items-center gap-3 p-4 bg-accent rounded-lg">
                   <Clock className="h-8 w-8 text-primary" />
                   <div>
-                    <p className="text-sm text-muted-foreground">Estimated Wait Time</p>
+                    <p className="text-sm text-muted-foreground">
+                      Estimated Wait Time
+                    </p>
                     <p className="text-xl font-semibold">
                       {queueEntry.estimated_wait_minutes || 0} minutes
                     </p>
                   </div>
                 </div>
 
-                {queueEntry.status === 'called' && (
+                {queueEntry.status === "serving" && (
                   <div className="flex items-center gap-3 p-4 bg-gradient-success text-white rounded-lg shadow-glow animate-pulse">
                     <Bell className="h-8 w-8" />
                     <div>
                       <p className="text-lg font-bold">It's Your Turn!</p>
-                      <p className="text-sm opacity-90">Please proceed to your counter</p>
+                      <p className="text-sm opacity-90">
+                        Please proceed to your counter
+                      </p>
                     </div>
                   </div>
                 )}
 
-                {queueEntry.status === 'waiting' && totalInQueue === 0 && (
+                {queueEntry.status === "waiting" && totalInQueue === 0 && (
                   <div className="flex items-center gap-3 p-4 bg-warning/10 border-2 border-warning rounded-lg">
                     <CheckCircle2 className="h-8 w-8 text-warning" />
                     <div>
                       <p className="text-sm font-semibold">You're Next!</p>
-                      <p className="text-xs text-muted-foreground">Please be ready</p>
+                      <p className="text-xs text-muted-foreground">
+                        Please be ready
+                      </p>
                     </div>
                   </div>
                 )}
@@ -453,7 +545,9 @@ const Queue = () => {
           </DialogHeader>
           <div className="space-y-4 pt-4">
             <div>
-              <Label>Rate your experience</Label>
+              <Label>
+                Rate your experience <span className="text-red-500">*</span>
+              </Label>
               <div className="flex gap-2 mt-2">
                 {[1, 2, 3, 4, 5].map((star) => (
                   <Button
@@ -473,6 +567,11 @@ const Queue = () => {
                   </Button>
                 ))}
               </div>
+              {rating > 0 && (
+                <p className="text-sm text-muted-foreground mt-1">
+                  You rated: {rating} star{rating !== 1 ? "s" : ""}
+                </p>
+              )}
             </div>
             <div>
               <Label htmlFor="feedback">Additional Comments (Optional)</Label>

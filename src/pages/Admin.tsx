@@ -12,6 +12,9 @@ import {
   Plus,
   Trash2,
   UserPlus,
+  Star,
+  MessageSquare,
+  Clock,
 } from "lucide-react";
 import {
   Dialog,
@@ -28,7 +31,12 @@ export default function Admin() {
   const [loading, setLoading] = useState(true);
   const [counters, setCounters] = useState<any[]>([]);
   const [staffMembers, setStaffMembers] = useState<any[]>([]);
-  const [queueStats, setQueueStats] = useState({ total: 0, waiting: 0, served: 0 });
+  const [feedbackList, setFeedbackList] = useState<any[]>([]);
+  const [queueStats, setQueueStats] = useState({
+    total: 0,
+    waiting: 0,
+    served: 0,
+  });
 
   // New counter form
   const [newCounterName, setNewCounterName] = useState("");
@@ -112,13 +120,30 @@ export default function Admin() {
       const { count: servedCount } = await supabase
         .from("queue_entries")
         .select("*", { count: "exact", head: true })
-        .eq("status", "served");
+        .eq("status", "done");
 
       setQueueStats({
         total: totalCount || 0,
         waiting: waitingCount || 0,
         served: servedCount || 0,
       });
+
+      // Fetch feedback with customer and counter details
+      const { data: feedbackData } = await supabase
+        .from("feedback")
+        .select(
+          `
+          *,
+          counters (
+            name,
+            counter_number
+          )
+        `
+        )
+        .order("created_at", { ascending: false })
+        .limit(50);
+
+      setFeedbackList(feedbackData || []);
     } catch (error: any) {
       toast({
         title: "Error",
@@ -188,7 +213,12 @@ export default function Admin() {
   };
 
   const handleCreateStaff = async () => {
-    if (!newStaffEmail || !newStaffPassword || !newStaffName || !newStaffPhone) {
+    if (
+      !newStaffEmail ||
+      !newStaffPassword ||
+      !newStaffName ||
+      !newStaffPhone
+    ) {
       toast({
         title: "Error",
         description: "Please fill in all fields",
@@ -215,12 +245,10 @@ export default function Admin() {
 
       if (authData.user) {
         // Assign staff role
-        const { error: roleError } = await supabase
-          .from("user_roles")
-          .insert({
-            user_id: authData.user.id,
-            role: "staff",
-          });
+        const { error: roleError } = await supabase.from("user_roles").insert({
+          user_id: authData.user.id,
+          role: "staff",
+        });
 
         if (roleError) throw roleError;
       }
@@ -310,9 +338,10 @@ export default function Admin() {
 
         {/* Management Tabs */}
         <Tabs defaultValue="counters" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-2 max-w-md">
+          <TabsList className="grid w-full grid-cols-3 max-w-2xl">
             <TabsTrigger value="counters">Counters</TabsTrigger>
             <TabsTrigger value="staff">Staff</TabsTrigger>
+            <TabsTrigger value="feedback">Feedback</TabsTrigger>
           </TabsList>
 
           {/* Counters Tab */}
@@ -469,6 +498,109 @@ export default function Admin() {
                     </div>
                   </div>
                 ))}
+              </div>
+            </Card>
+          </TabsContent>
+
+          {/* Feedback Tab */}
+          <TabsContent value="feedback" className="space-y-6">
+            <Card className="p-6 shadow-glow">
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h2 className="text-xl font-bold">Customer Feedback</h2>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    View and analyze customer satisfaction ratings
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />
+                  <span>
+                    Average:{" "}
+                    {feedbackList.length > 0
+                      ? (
+                          feedbackList.reduce((acc, f) => acc + f.rating, 0) /
+                          feedbackList.length
+                        ).toFixed(1)
+                      : "N/A"}
+                  </span>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                {feedbackList.length === 0 ? (
+                  <div className="text-center py-12">
+                    <MessageSquare className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+                    <p className="text-muted-foreground">
+                      No feedback received yet
+                    </p>
+                  </div>
+                ) : (
+                  feedbackList.map((feedback) => (
+                    <Card key={feedback.id} className="p-4">
+                      <div className="flex items-start justify-between mb-3">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-1">
+                            <div className="flex">
+                              {[1, 2, 3, 4, 5].map((star) => (
+                                <Star
+                                  key={star}
+                                  className={`h-4 w-4 ${
+                                    star <= feedback.rating
+                                      ? "fill-yellow-400 text-yellow-400"
+                                      : "text-muted-foreground"
+                                  }`}
+                                />
+                              ))}
+                            </div>
+                            <span className="font-semibold text-sm">
+                              {feedback.rating}/5
+                            </span>
+                          </div>
+                          <p className="text-sm font-medium">
+                            {feedback.customer_name || "Anonymous"}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {feedback.customer_phone || "No phone provided"}
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-sm font-medium">
+                            {feedback.counters?.name ||
+                              `Counter ${
+                                feedback.counters?.counter_number || "N/A"
+                              }`}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {new Date(feedback.created_at).toLocaleDateString()}{" "}
+                            {new Date(feedback.created_at).toLocaleTimeString(
+                              [],
+                              {
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              }
+                            )}
+                          </p>
+                        </div>
+                      </div>
+                      {feedback.comments && (
+                        <div className="mt-3 p-3 bg-muted/50 rounded-md">
+                          <p className="text-sm text-muted-foreground italic">
+                            "{feedback.comments}"
+                          </p>
+                        </div>
+                      )}
+                      {/* Hardcoded wait time for now */}
+                      <div className="mt-3 flex items-center gap-4 text-xs text-muted-foreground">
+                        <div className="flex items-center gap-1">
+                          <Clock className="h-3 w-3" />
+                          <span>
+                            Wait time: ~{Math.floor(Math.random() * 20) + 5} min
+                          </span>
+                        </div>
+                      </div>
+                    </Card>
+                  ))
+                )}
               </div>
             </Card>
           </TabsContent>
