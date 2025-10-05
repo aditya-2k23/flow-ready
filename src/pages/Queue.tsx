@@ -5,7 +5,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { Users, Clock, Ticket, Bell, Loader2, CheckCircle2 } from "lucide-react";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
+import { Users, Clock, Ticket, Bell, Loader2, CheckCircle2, LogOut, Star } from "lucide-react";
 
 interface QueueEntry {
   id: string;
@@ -24,10 +26,14 @@ const Queue = () => {
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
   const [joining, setJoining] = useState(false);
+  const [leaving, setLeaving] = useState(false);
   const [queueEntry, setQueueEntry] = useState<QueueEntry | null>(null);
   const [totalInQueue, setTotalInQueue] = useState(0);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
+  const [showFeedback, setShowFeedback] = useState(false);
+  const [rating, setRating] = useState(0);
+  const [feedbackText, setFeedbackText] = useState("");
 
   useEffect(() => {
     // Check if user has an active queue entry in localStorage
@@ -61,10 +67,7 @@ const Queue = () => {
             setQueueEntry(payload.new as QueueEntry);
             checkNotification(payload.new as QueueEntry);
           } else if (payload.eventType === "DELETE") {
-            toast({
-              title: "Queue Entry Completed",
-              description: "You have been served. Thank you!",
-            });
+            setShowFeedback(true);
             localStorage.removeItem("queueEntryId");
             setQueueEntry(null);
           }
@@ -195,7 +198,7 @@ const Queue = () => {
           position_in_queue: position,
           estimated_wait_minutes: position * 2,
         })
-        .select()
+        .select("*, counters(counter_number, name)")
         .single();
 
       if (insertError) throw insertError;
@@ -221,6 +224,46 @@ const Queue = () => {
     } finally {
       setJoining(false);
     }
+  };
+
+  const leaveQueue = async () => {
+    if (!queueEntry) return;
+    
+    setLeaving(true);
+    try {
+      const { error } = await supabase
+        .from("queue_entries")
+        .delete()
+        .eq("id", queueEntry.id);
+
+      if (error) throw error;
+
+      toast({
+        title: "Left Queue",
+        description: "You have successfully left the queue.",
+      });
+
+      localStorage.removeItem("queueEntryId");
+      setQueueEntry(null);
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setLeaving(false);
+    }
+  };
+
+  const submitFeedback = () => {
+    toast({
+      title: "Thank you for your feedback!",
+      description: "We appreciate your time.",
+    });
+    setShowFeedback(false);
+    setRating(0);
+    setFeedbackText("");
   };
 
   if (loading) {
@@ -363,11 +406,88 @@ const Queue = () => {
                     </div>
                   </div>
                 )}
+
+                <Button
+                  onClick={leaveQueue}
+                  disabled={leaving}
+                  variant="outline"
+                  className="w-full mt-4"
+                >
+                  {leaving ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Leaving...
+                    </>
+                  ) : (
+                    <>
+                      <LogOut className="mr-2 h-4 w-4" />
+                      Leave Queue
+                    </>
+                  )}
+                </Button>
               </CardContent>
             </Card>
           </div>
         )}
       </div>
+
+      <Dialog open={showFeedback} onOpenChange={setShowFeedback}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Thank you for visiting!</DialogTitle>
+            <DialogDescription>
+              You have been served. We'd love to hear your feedback.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 pt-4">
+            <div>
+              <Label>Rate your experience</Label>
+              <div className="flex gap-2 mt-2">
+                {[1, 2, 3, 4, 5].map((star) => (
+                  <Button
+                    key={star}
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => setRating(star)}
+                    className="h-10 w-10"
+                  >
+                    <Star
+                      className={`h-6 w-6 ${
+                        star <= rating
+                          ? "fill-yellow-400 text-yellow-400"
+                          : "text-muted-foreground"
+                      }`}
+                    />
+                  </Button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <Label htmlFor="feedback">Additional Comments (Optional)</Label>
+              <Textarea
+                id="feedback"
+                placeholder="Tell us about your experience..."
+                value={feedbackText}
+                onChange={(e) => setFeedbackText(e.target.value)}
+                className="mt-2"
+                rows={4}
+              />
+            </div>
+            <div className="flex gap-2">
+              <Button onClick={submitFeedback} className="flex-1">
+                Submit Feedback
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => setShowFeedback(false)}
+                className="flex-1"
+              >
+                Skip
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
